@@ -1,3 +1,4 @@
-import * as wasm from "hello-wasm-pack";
+import * as wasm from "bakuanimation-davidtest";
 
-wasm.greet();
+wasm.greet("Spiderman");
+wasm.create_test();
