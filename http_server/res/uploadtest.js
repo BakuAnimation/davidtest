@@ -130,7 +130,7 @@ $(function() {
 
 		$.ajax({
 			type: "POST",
-			url: "upload",
+			url: "me/upload",
 			xhr: function () {
 				var x = $.ajaxSettings.xhr();
 				if (x.upload) {
@@ -203,7 +203,7 @@ $(function() {
 				snapshotSwapItCallback();
 			} else {
 				if (!img.attr("src")) {
-					img.attr("src", "get?path=" + "noname" + k + ".jpg" + "&size=" + snapshotSize);
+					img.attr("src", "me/images/" + "730acc6b-df46-49f5-91eb-745d9389fc13" + ".jpg" + "?width=" + snapshotSize + "&height=" + snapshotSize); // + k
 					imagesMemory += img.attr("src").length;
 					img[0].onload = function() {
 						img.stop().fadeIn();
@@ -332,7 +332,7 @@ $(function() {
 			spread(total, function(k, cb0) {
 				prepareIt(k, function() {
 					var r = new Image();
-					r.src = "get?path=" + "noname" + k + ".jpg";
+					r.src = "me/images/" + "730acc6b-df46-49f5-91eb-745d9389fc13" + ".jpg" + "?width=1000&height=1000"; // + k
 					r.onload = function() {
 						snapshotIt(k, r, cb0);
 					};
