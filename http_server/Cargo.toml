@@ -12,3 +12,7 @@ warp = { git = "https://github.com/seanmonstar/warp" }
 tokio = "0.2.0-alpha.6"
 pretty_env_logger = "0.3"
 futures-preview = "0.3.0-alpha.19"
+image = "0.22.3"
+tokio-executor = "0.2.0-alpha.6"
+uuid = { version = "0.8", features = ["serde", "v4"] }
+serde = "1.0.102"
