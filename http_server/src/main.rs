@@ -1,4 +1,3 @@
-use futures::future::{try_join};
 use std::path::Path;
 use tokio_executor::blocking;
 use tokio::fs::{create_dir, File};
@@ -9,121 +8,90 @@ use serde::Deserialize;
 
 
 #[derive(Deserialize)]
-struct Resize {
+struct Size {
     width: u32,
     height: u32
 }
 
 async fn handle_multipart(mut form: warp::multipart::FormData) -> Result<Vec<Uuid>, warp::Rejection> {
     let img_directory = Path::new("upload_files");
-    let thumbs_directory = Path::new("upload_thumbs");
-    try_join(create_dir(img_directory), create_dir(thumbs_directory))
-        .await
-        .map_err(warp::reject::custom)?;
-        let mut uuids = Vec::new();
+    if !img_directory.exists() {
+        create_dir(img_directory).await.map_err(warp::reject::custom)?;
+    }
+
+    let mut uuids = Vec::new();
+
     while let Some(part) = form.next().await {
         let part = part.map_err(warp::reject::custom)?;
         
-            let uuid = Uuid::new_v4();
-            let filename = uuid.to_string();
-            let image_path = Path::join(img_directory, Path::new(&filename));
-            let thumbnail_path = Path::join(thumbs_directory, Path::new(&filename));
+        let uuid = Uuid::new_v4();
+        let filename = format!("{}.jpg", uuid.to_string());
+        let image_path = Path::join(img_directory, Path::new(&filename));
 
-            let image_buffer = part.concat().await;
+        let image_buffer = part.concat().await;
 
-            let image = image::load_from_memory(&image_buffer).map_err(warp::reject::custom)?;
+        let mut image_file = File::create(image_path)
+            .await
+            .map_err(warp::reject::custom)?;
+        image_file.write_all(&image_buffer).await.map_err(warp::reject::custom)?;
+        image_file.sync_data().await.map_err(warp::reject::custom)?;
 
-            let thumbnail = blocking::run(move || {
-                image.resize(200, 200, image::imageops::FilterType::Lanczos3)
-            })
-            .await;
-
-            let mut thumbnail_buffer = Vec::new();
-
-            thumbnail
-                .write_to(&mut thumbnail_buffer, image::ImageOutputFormat::JPEG(200))
-                .map_err(warp::reject::custom)?;
-
-            let mut image_file = File::create(image_path)
-                .await
-                .map_err(warp::reject::custom)?;
-            let image_fut = async {
-                image_file.write_all(&image_buffer).await?;
-                image_file.sync_data().await
-            };
-
-            let mut thumb_file = File::create(thumbnail_path)
-                .await
-                .map_err(warp::reject::custom)?;
-            let thumb_fut = async {
-                thumb_file.write_all(&thumbnail_buffer).await?;
-                thumb_file.sync_data().await
-            };
-
-            try_join(image_fut, thumb_fut)
-                .await
-                .map_err(warp::reject::custom)?;
-
-                uuids.push(uuid);
-        
+        uuids.push(uuid);
     }
 
     Ok(uuids)
 }
 
 
-async fn handle_get_images(filename: String, r : Resize) -> Result<Vec<u8>, warp::Rejection> {
-    let img_directory = Path::new("upload_files");
+async fn handle_get_images(filename: String, r : Size) -> Result<Vec<u8>, warp::Rejection> {
     let thumbs_directory = Path::new("upload_thumbs");
-/*
-    try_join(create_dir(img_directory), create_dir(thumbs_directory))
-        .await
-        .map_err(warp::reject::custom)?;
- */       
-    let image_path = Path::join(img_directory, Path::new(&filename));
     let thumbnail_path = Path::join(thumbs_directory, Path::new(&format!("{}-{}x{}", filename, r.width, r.height)));
 
+    let mut thumbnail_buffer = Vec::new();
+
     if thumbnail_path.exists() {
-            let mut f = File::open(&thumbnail_path).await.map_err(warp::reject::custom)?;
-            let mut thumbnail_buffer = Vec::new();
-            f.read_to_end(&mut thumbnail_buffer).await.map_err(warp::reject::custom)?;
-            return Ok(thumbnail_buffer);
-        } else {
-            let image = image::open(&image_path).map_err(warp::reject::custom)?;
+        let mut f = File::open(&thumbnail_path).await.map_err(warp::reject::custom)?;
+        f.read_to_end(&mut thumbnail_buffer).await.map_err(warp::reject::custom)?;
+    } else {
+        let img_directory = Path::new("upload_files");
+        let image_path = Path::join(img_directory, Path::new(&filename));
+        let image = image::open(&image_path).map_err(warp::reject::custom)?;
 
-            println!("1");
-            let thumbnail = blocking::run(move || {
-                image.resize(r.width, r.height, image::imageops::FilterType::Lanczos3)
-            })
-            .await;
-            println!("2");
+        println!("Resizing {}", filename);
+        let thumbnail = blocking::run(move || {
+            image.resize(r.width, r.height, image::imageops::FilterType::Lanczos3)
+        })
+        .await;
+        println!("Done {}", filename);
 
-            let mut thumbnail_buffer = Vec::new();
+        if !thumbs_directory.exists() {
+            create_dir(thumbs_directory).await.map_err(warp::reject::custom)?;
+        }
 
-            thumbnail
-                .write_to(&mut thumbnail_buffer, image::ImageOutputFormat::JPEG(200))
-                .map_err(warp::reject::custom)?;
+        thumbnail
+            .write_to(&mut thumbnail_buffer, image::ImageOutputFormat::JPEG(200))
+            .map_err(warp::reject::custom)?;
 
-            let mut thumb_file = File::create(thumbnail_path)
-                .await
-                .map_err(warp::reject::custom)?;
-            let thumb_fut = async {
-                thumb_file.write_all(&thumbnail_buffer).await?;
-                thumb_file.sync_data().await
-            };
+        let mut thumb_file = File::create(thumbnail_path)
+            .await
+            .map_err(warp::reject::custom)?;
+        let thumb_fut = async {
+            thumb_file.write_all(&thumbnail_buffer).await?;
+            thumb_file.sync_data().await
+        };
 
-            thumb_fut
-                .await
-                .map_err(warp::reject::custom)?;
+        thumb_fut
+            .await
+            .map_err(warp::reject::custom)?;
 
-            let mut thumbnail_buffer = Vec::new();
+        let mut thumbnail_buffer = Vec::new();
 
-            thumbnail
-                .write_to(&mut thumbnail_buffer, image::ImageOutputFormat::JPEG(200))
-                .map_err(warp::reject::custom)?;
-
-            return Ok(thumbnail_buffer);
+        thumbnail
+            .write_to(&mut thumbnail_buffer, image::ImageOutputFormat::JPEG(200))
+            .map_err(warp::reject::custom)?;
     }
+    
+    Ok(thumbnail_buffer)
 }
 
 #[tokio::main]
@@ -143,12 +111,10 @@ async fn main() {
     .and(warp::query())
     .and_then(handle_get_images)
     .map(|buffer| {
-warp::http::Response::builder()
-        .header("Content-Type", "image/jpg")
-        .body(buffer)
-    }        
-)
-    );
+        warp::http::Response::builder()
+            .header("Content-Type", "image/jpg")
+            .body(buffer)
+        }));
 
     let routes = hi.or(get).or(multipart).or(warp::fs::dir("res"));
 
