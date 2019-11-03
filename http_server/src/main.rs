@@ -83,14 +83,12 @@ async fn handle_get_images(filename: String, r : Resize) -> Result<Vec<u8>, warp
     let image_path = Path::join(img_directory, Path::new(&filename));
     let thumbnail_path = Path::join(thumbs_directory, Path::new(&format!("{}-{}x{}", filename, r.width, r.height)));
 
-    match File::open(&thumbnail_path) {
-        Ok(f) => {
-            let g = File::open(&thumbnail_path).map_err(warp::reject::custom)?;
+    if thumbnail_path.exists() {
+            let mut f = File::open(&thumbnail_path).await.map_err(warp::reject::custom)?;
             let mut thumbnail_buffer = Vec::new();
-            f.read_to_end(&mut thumbnail_buffer).map_err(warp::reject::custom)?;
+            f.read_to_end(&mut thumbnail_buffer).await.map_err(warp::reject::custom)?;
             return Ok(thumbnail_buffer);
-        },
-        Err(_) => {
+        } else {
             let image = image::open(&image_path).map_err(warp::reject::custom)?;
 
             println!("1");
@@ -125,7 +123,6 @@ async fn handle_get_images(filename: String, r : Resize) -> Result<Vec<u8>, warp
                 .map_err(warp::reject::custom)?;
 
             return Ok(thumbnail_buffer);
-        },
     }
 }
 
