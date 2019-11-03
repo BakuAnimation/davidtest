@@ -5,7 +5,8 @@ use tokio::prelude::*;
 use warp::Filter;
 use uuid::Uuid;
 use serde::Deserialize;
-
+use serde_json::{Value, from_str, to_string};
+use std::str;
 
 #[derive(Deserialize)]
 struct Size {
@@ -93,6 +94,61 @@ async fn handle_get_images(project_id: String, filename: String, r : Size) -> Re
     Ok(thumbnail_buffer)
 }
 
+async fn handle_stack(project_id: String, body: String) -> Result<(), warp::Rejection> {
+    let stack_directory = Path::new("stacks");
+    let stack_path = Path::join(stack_directory, Path::new(&format!("{}.stack", project_id)));
+    create_dir_all(stack_path.parent().unwrap()).await.map_err(warp::reject::custom)?;
+
+    let mut json: Vec<String>;
+
+    if stack_path.exists() {
+        let mut buffer = Vec::new();
+        let mut f = File::open(&stack_path).await.map_err(warp::reject::custom)?;
+        f.read_to_end(&mut buffer).await.map_err(warp::reject::custom)?;
+
+        let s = match str::from_utf8(&buffer) {
+            Ok(v) => v,
+            Err(e) => panic!("Invalid UTF-8 sequence: {}", e),
+        };
+
+        println!("{}: Stacking {}", project_id, body);
+
+        json = from_str(s).map_err(warp::reject::custom)?;
+    } else {
+        json = Vec::new();
+    }
+    json.push(body);
+
+    let json_as_string = serde_json::to_string(&json).unwrap();
+
+    //TODO concurrency
+    let mut written_file = File::create(&stack_path).await.map_err(warp::reject::custom)?;
+    written_file.write_all(&json_as_string.as_bytes()).await.map_err(warp::reject::custom)?;
+    written_file.sync_data().await.map_err(warp::reject::custom)?;
+
+    Ok(())
+}
+
+async fn handle_history(project_id: String) -> Result<Vec<String>, warp::Rejection> {
+    let stack_directory = Path::new("stacks");
+    let stack_path = Path::join(stack_directory, Path::new(&format!("{}.stack", project_id)));
+
+    if stack_path.exists() {
+        let mut buffer = Vec::new();
+        let mut f = File::open(&stack_path).await.map_err(warp::reject::custom)?;
+        f.read_to_end(&mut buffer).await.map_err(warp::reject::custom)?;
+
+        let s = match str::from_utf8(&buffer) {
+            Ok(v) => v,
+            Err(e) => panic!("Invalid UTF-8 sequence: {}", e),
+        };
+
+        Ok(from_str(s).map_err(warp::reject::custom)?)
+    } else {
+        Ok(Vec::new())
+    }
+}
+
 #[tokio::main]
 async fn main() {
     let _ = pretty_env_logger::try_init();
@@ -118,7 +174,18 @@ async fn main() {
             .body(buffer)
         });
 
-    let routes = hi.or(get).or(multipart).or(warp::fs::dir("res"));
+    let stack = warp::post2()
+        .and(warp::path::param())
+        .and(warp::path("stack"))
+        .and(warp::body::json())
+        .and_then(handle_stack)
+        .map(|_| "Stacked");
+    let history = warp::get2()
+        .and(warp::path::param())
+        .and_then(handle_history)
+        .map(|history| warp::reply::json(&history));
+
+    let routes = hi.or(stack).or(history).or(get).or(multipart).or(warp::fs::dir("res"));
 
     warp::serve(routes).run(([127, 0, 0, 1], 3030)).await;
 }
